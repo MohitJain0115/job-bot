@@ -1,36 +1,44 @@
 import feedparser
 import requests
 import html
+import json
+import os
 
-# --- YOUR BOT DETAILS ---
-TOKEN = "8241752968:AAEM38E7zxFlU9bEw1i4z8B8kxDW2a9pMvc"
-CHAT_ID = "-1003508880606"   # IMPORTANT: keep -100
+TOKEN = "YOUR_TOKEN"
+CHAT_ID = "-1003508880606"
 
 RSS_URL = "https://rss.app/feeds/urVv1QL6bZI0zoAF.xml"
+DB_FILE = "sent_jobs.json"
+
+
+# --- load sent jobs history ---
+if os.path.exists(DB_FILE):
+    with open(DB_FILE, "r") as f:
+        sent_jobs = set(json.load(f))
+else:
+    sent_jobs = set()
 
 
 def send(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    r = requests.post(url, json={
+    requests.post(url, json={
         "chat_id": CHAT_ID,
         "text": msg,
         "disable_web_page_preview": False
     })
-    print("Telegram response:", r.text)
 
 
-# --- Read RSS ---
 feed = feedparser.parse(RSS_URL)
-print("Total jobs found:", len(feed.entries))
 
-# --- Force send FIRST job ---
-if len(feed.entries) == 0:
-    send("❌ RSS working but no jobs found")
-else:
-    entry = feed.entries[0]
+new_found = False
+
+for entry in feed.entries:
+    link = entry.link.strip()
+
+    if link in sent_jobs:
+        continue
 
     title = html.unescape(entry.title.strip())
-    link = entry.link.strip()
 
     message = f"""🧑‍💼 NEW JOB ALERT
 
@@ -41,3 +49,16 @@ Apply Here:
 """
 
     send(message)
+
+    sent_jobs.add(link)
+    new_found = True
+    break   # send only 1 per run (prevents spam)
+
+
+# save history
+with open(DB_FILE, "w") as f:
+    json.dump(list(sent_jobs), f)
+
+
+if not new_found:
+    print("No new jobs")
