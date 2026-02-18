@@ -1,7 +1,7 @@
 import feedparser
 import requests
 
-TOKEN = "8241752968:AAFUz9YvDc3hrICVBFn7sz5xEH2eh-lkhIY"
+TOKEN = "8241752968:AAGISvzpSDSPMLS_FxQOHkobg9T-23SBj04"
 CHAT_ID = "1003508880606"
 
 RSS_URL = "https://rss.app/feeds/urVv1QL6bZI0zoAF.xml"
