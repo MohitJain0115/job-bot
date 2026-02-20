@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime
 
-TOKEN = "YOUR_TOKEN"
+TOKEN = "8241752968:AAEM38E7zxFlU9bEw1i4z8B8kxDW2a9pMvc"
 CHAT_ID = "-1003508880606"
 DB_FILE = "sent_jobs.json"
 
