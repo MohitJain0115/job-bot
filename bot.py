@@ -4,11 +4,12 @@ import html
 import json
 import os
 import time
-from datetime import datetime
+from bs4 import BeautifulSoup
 
 TOKEN = "8241752968:AAEM38E7zxFlU9bEw1i4z8B8kxDW2a9pMvc"
 CHAT_ID = "-1003508880606"
 DB_FILE = "sent_jobs.json"
+
 
 # ---------------- RSS COMPANIES ----------------
 FEEDS = {
@@ -17,177 +18,163 @@ FEEDS = {
     "Deloitte_USI": "https://rss.app/feeds/NmutfEwPtt7tEwvt.xml"
 }
 
-# ---------------- ORACLE APIs ----------------
-ORACLE_APIS = {
-    "KPMG": "https://ejgk.fa.em2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;siteNumber=CX_1,locationId=300000000296042,limit=25,sortBy=POSTING_DATES_DESC",
 
-    "Company2": "https://ejgk.fa.em2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;siteNumber=CX_3001,locationId=300000000296042,limit=25,sortBy=POSTING_DATES_DESC"
+# ---------------- API COMPANIES ----------------
+ORACLE_APIS = {
+    "KPMG": "https://ejgk.fa.em2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;siteNumber=CX_1,facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,limit=25,locationId=300000000296042,sortBy=POSTING_DATES_DESC",
+
+    "KPMG-Alt": "https://ejgk.fa.em2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;siteNumber=CX_3001,facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,limit=25,locationId=300000000296042,sortBy=POSTING_DATES_DESC"
 }
 
-# ---------------- PWC API ----------------
-PWC_API = "https://www.pwc.com/gx/en/careers/job-results.shorturl.json?currentUrl=https%3A%2F%2Fwww.pwc.com%2Fgx%2Fen%2Fcareers%2Fjob-results.html%3Fwdcountry%3DIND%26wdjobsite%3DGlobal_Campus_Careers"
+PWC_API = "https://www.pwc.com/gx/en/careers/job-results.shorturl.json?currentUrl=https%3A%2F%2Fwww.pwc.com%2Fgx%2Fen%2Fcareers%2Fjob-results.html%3Fwdcountry%3DIND%26wdjobsite%3DGlobal_Campus_Careers%26flds%3Djobreqid%2Ctitle%2Clocation%2Clos%2Cspecialism%2Cgrade%2Cindustry%2Cregion%2Capply%2Cjobsite%2Ciso"
 
-# ---------------- Load DB ----------------
+
+# ---------------- LOAD HISTORY ----------------
 if os.path.exists(DB_FILE):
     with open(DB_FILE, "r") as f:
         sent_jobs = set(json.load(f))
 else:
     sent_jobs = set()
 
-# ---------------- SAFE REQUEST ----------------
-def safe_get(url, headers=None):
-    try:
-        r = requests.get(url, headers=headers, timeout=25)
-        if r.status_code == 200:
-            return r
-        else:
-            print("Bad status:", r.status_code, url)
-            return None
-    except Exception as e:
-        print("FAILED:", url)
-        print(e)
-        return None
 
 # ---------------- TELEGRAM SEND ----------------
 def send(msg):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-
     try:
-        r = requests.post(url, json={
-            "chat_id": CHAT_ID,
-            "text": msg,
-            "disable_web_page_preview": False
-        }, timeout=20)
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={
+                "chat_id": CHAT_ID,
+                "text": msg,
+                "disable_web_page_preview": False
+            },
+            timeout=20
+        )
+        time.sleep(1.5)  # anti spam
+    except:
+        print("Telegram send failed")
 
-        print("Telegram:", r.status_code)
 
-    except Exception as e:
-        print("Telegram Error:", e)
+# ---------------- RSS SCANNER ----------------
+def scan_rss():
+    global sent_jobs
 
-    time.sleep(2)
+    for company, url in FEEDS.items():
+        print("Checking RSS:", company)
 
-# =========================================================
-# RSS FEEDS
-# =========================================================
-def check_rss():
-    print("\n--- Checking RSS Feeds ---")
-
-    for company, RSS_URL in FEEDS.items():
-        print("Checking", company)
-
-        feed = feedparser.parse(RSS_URL)
+        try:
+            feed = feedparser.parse(url)
+        except:
+            continue
 
         for entry in feed.entries:
             link = entry.link.strip()
-
             if link in sent_jobs:
                 continue
 
             title = html.unescape(entry.title.strip())
 
-            message = f"""🏢 {company} Hiring!
+            message = f"""🏢 {company} Hiring
 
 🧑‍💼 {title}
 
-Apply Here:
+🔗 Apply:
 {link}
 
-#Jobs #{company}
+#Jobs #Hiring #{company}
 """
+
             send(message)
             sent_jobs.add(link)
 
-# =========================================================
-# ORACLE CLOUD APIs (KPMG etc)
-# =========================================================
-def check_oracle():
-    print("\n--- Checking Oracle APIs ---")
 
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
-    }
+# ---------------- ORACLE API SCANNER ----------------
+def scan_oracle():
+    global sent_jobs
 
     for company, url in ORACLE_APIS.items():
-        print("Checking", company)
-
-        r = safe_get(url, headers)
-        if not r:
-            continue
+        print("Checking API:", company)
 
         try:
-            data = r.json()
+            data = requests.get(url, timeout=25).json()
         except:
             continue
 
         jobs = data.get("items", [])
 
         for job in jobs:
-            title = job.get("Title", "Job Opening")
-            jobid = job.get("Id")
-
-            link = f"https://ejgk.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/{jobid}"
+            title = job.get("Title")
+            job_id = str(job.get("Id"))
+            link = f"https://ejgk.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/{job_id}"
 
             if link in sent_jobs:
                 continue
 
-            message = f"""🏢 {company} Hiring!
+            location = ""
+            try:
+                location = job["PrimaryLocation"]["LocationName"]
+            except:
+                pass
+
+            message = f"""🏢 {company} Hiring
 
 🧑‍💼 {title}
+📍 {location}
 
-Apply Here:
+🔗 Apply:
 {link}
 
 #Jobs #{company}
 """
+
             send(message)
             sent_jobs.add(link)
 
-# =========================================================
-# PWC
-# =========================================================
-def check_pwc():
-    print("\n--- Checking PwC ---")
 
-    r = safe_get(PWC_API)
-    if not r:
-        return
+# ---------------- PWC SCANNER ----------------
+def scan_pwc():
+    global sent_jobs
+
+    print("Checking PwC")
 
     try:
-        data = r.json()
+        data = requests.get(PWC_API, timeout=25).json()
     except:
         return
 
     jobs = data.get("data", [])
 
     for job in jobs:
-        title = job.get("title", "Job Opening")
-        link = job.get("applyUrl")
+        title = BeautifulSoup(job.get("title", ""), "html.parser").text
+        link = job.get("apply")
 
         if not link or link in sent_jobs:
             continue
 
-        message = f"""🏢 PwC Hiring!
+        location = job.get("location", "India")
+
+        message = f"""🏢 PwC Hiring
 
 🧑‍💼 {title}
+📍 {location}
 
-Apply Here:
+🔗 Apply:
 {link}
 
 #Jobs #PwC
 """
+
         send(message)
         sent_jobs.add(link)
 
-# =========================================================
-# RUN ALL
-# =========================================================
-check_rss()
-check_oracle()
-check_pwc()
 
-# Save DB
+# ---------------- RUN ALL ----------------
+scan_rss()
+scan_oracle()
+scan_pwc()
+
+
+# ---------------- SAVE HISTORY ----------------
 with open(DB_FILE, "w") as f:
     json.dump(list(sent_jobs), f)
 
-print("\nFinished successfully")
+print("Run complete")
