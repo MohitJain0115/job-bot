@@ -4,122 +4,168 @@ import html
 import json
 import os
 import time
-from bs4 import BeautifulSoup
 from datetime import datetime
 
 TOKEN = "YOUR_TOKEN"
 CHAT_ID = "-1003508880606"
+DB_FILE = "sent_jobs.json"
 
-# ---- TEST DATE ----
-TARGET_DATE = datetime(2026, 2, 20).date()
-
-# -------- RSS FEEDS --------
+# ---------------- RSS COMPANIES ----------------
 FEEDS = {
     "EY-Experience": "https://rss.app/feeds/ArdGwF1NJ5lTBKyI.xml",
     "EY-New": "https://rss.app/feeds/5zPz95dx36JeAAfP.xml",
     "Deloitte_USI": "https://rss.app/feeds/NmutfEwPtt7tEwvt.xml"
 }
 
+# ---------------- ORACLE APIs ----------------
+ORACLE_APIS = {
+    "KPMG": "https://ejgk.fa.em2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;siteNumber=CX_1,locationId=300000000296042,limit=25,sortBy=POSTING_DATES_DESC",
 
+    "Company2": "https://ejgk.fa.em2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;siteNumber=CX_3001,locationId=300000000296042,limit=25,sortBy=POSTING_DATES_DESC"
+}
+
+# ---------------- PWC API ----------------
+PWC_API = "https://www.pwc.com/gx/en/careers/job-results.shorturl.json?currentUrl=https%3A%2F%2Fwww.pwc.com%2Fgx%2Fen%2Fcareers%2Fjob-results.html%3Fwdcountry%3DIND%26wdjobsite%3DGlobal_Campus_Careers"
+
+# ---------------- Load DB ----------------
+if os.path.exists(DB_FILE):
+    with open(DB_FILE, "r") as f:
+        sent_jobs = set(json.load(f))
+else:
+    sent_jobs = set()
+
+# ---------------- SAFE REQUEST ----------------
+def safe_get(url, headers=None):
+    try:
+        r = requests.get(url, headers=headers, timeout=25)
+        if r.status_code == 200:
+            return r
+        else:
+            print("Bad status:", r.status_code, url)
+            return None
+    except Exception as e:
+        print("FAILED:", url)
+        print(e)
+        return None
+
+# ---------------- TELEGRAM SEND ----------------
 def send(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
-    r = requests.post(url, json={
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "disable_web_page_preview": False
-    })
+    try:
+        r = requests.post(url, json={
+            "chat_id": CHAT_ID,
+            "text": msg,
+            "disable_web_page_preview": False
+        }, timeout=20)
 
-    print("Telegram:", r.status_code)
+        print("Telegram:", r.status_code)
+
+    except Exception as e:
+        print("Telegram Error:", e)
+
     time.sleep(2)
 
+# =========================================================
+# RSS FEEDS
+# =========================================================
+def check_rss():
+    print("\n--- Checking RSS Feeds ---")
 
-# -------- CHECK DATE --------
-def is_target_date(date_string):
-    try:
-        dt = datetime.fromisoformat(date_string.replace("Z",""))
-        return dt.date() == TARGET_DATE
-    except:
-        return False
+    for company, RSS_URL in FEEDS.items():
+        print("Checking", company)
 
+        feed = feedparser.parse(RSS_URL)
 
-# -------- RSS --------
-def check_rss(company, url):
-    feed = feedparser.parse(url)
+        for entry in feed.entries:
+            link = entry.link.strip()
 
-    for entry in feed.entries:
-        if not hasattr(entry, "published_parsed"):
-            continue
-
-        post_date = datetime(*entry.published_parsed[:6]).date()
-
-        if post_date != TARGET_DATE:
-            continue
-
-        message = f"""🏢 {company} Hiring!
-
-🧑‍💼 {html.unescape(entry.title)}
-
-Apply Here:
-{entry.link}
-
-#Jobs #MNCJobs #{company}
-"""
-        send(message)
-
-
-# -------- ORACLE --------
-def fetch_oracle(company, site):
-    offset = 0
-
-    while True:
-        url = f"https://ejgk.fa.em2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;siteNumber={site},facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,limit=25,offset={offset},locationId=300000000296042,sortBy=POSTING_DATES_DESC"
-
-        r = requests.get(url)
-        data = r.json()
-        items = data.get("items", [])
-
-        if not items:
-            break
-
-        for job in items:
-            posted = job.get("PostedDate") or job.get("CreationDate")
-            if not posted or not is_target_date(posted):
+            if link in sent_jobs:
                 continue
 
-            title = job.get("Title", "No Title")
-            job_id = job.get("Id")
-            location = job.get("PrimaryLocation", {}).get("LocationName", "India")
-
-            link = f"https://ejgk.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/{site}/job/{job_id}"
+            title = html.unescape(entry.title.strip())
 
             message = f"""🏢 {company} Hiring!
 
-🧑‍💼 {title} - {location}
+🧑‍💼 {title}
 
 Apply Here:
 {link}
 
-#Jobs #MNCJobs #{company}
+#Jobs #{company}
 """
             send(message)
+            sent_jobs.add(link)
 
-        offset += 25
+# =========================================================
+# ORACLE CLOUD APIs (KPMG etc)
+# =========================================================
+def check_oracle():
+    print("\n--- Checking Oracle APIs ---")
 
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
+    }
 
-# -------- PWC CAMPUS --------
-def fetch_pwc_campus():
-    url = "https://www.pwc.com/gx/en/careers/job-results.shorturl.json?currentUrl=https%3A%2F%2Fwww.pwc.com%2Fgx%2Fen%2Fcareers%2Fjob-results.html%3Fwdcountry%3DIND%26wdjobsite%3DGlobal_Campus_Careers%26flds%3Djobreqid%2Ctitle%2Clocation%2Clos%2Cspecialism%2Cgrade%2Cindustry%2Cregion%2Capply%2Cjobsite%2Ciso"
+    for company, url in ORACLE_APIS.items():
+        print("Checking", company)
 
-    data = requests.get(url).json()
-
-    for job in data.get("data", []):
-        date = job.get("postedDate")
-        if not date or not is_target_date(date):
+        r = safe_get(url, headers)
+        if not r:
             continue
 
-        title = job.get("title")
-        link = job.get("apply")
+        try:
+            data = r.json()
+        except:
+            continue
+
+        jobs = data.get("items", [])
+
+        for job in jobs:
+            title = job.get("Title", "Job Opening")
+            jobid = job.get("Id")
+
+            link = f"https://ejgk.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/{jobid}"
+
+            if link in sent_jobs:
+                continue
+
+            message = f"""🏢 {company} Hiring!
+
+🧑‍💼 {title}
+
+Apply Here:
+{link}
+
+#Jobs #{company}
+"""
+            send(message)
+            sent_jobs.add(link)
+
+# =========================================================
+# PWC
+# =========================================================
+def check_pwc():
+    print("\n--- Checking PwC ---")
+
+    r = safe_get(PWC_API)
+    if not r:
+        return
+
+    try:
+        data = r.json()
+    except:
+        return
+
+    jobs = data.get("data", [])
+
+    for job in jobs:
+        title = job.get("title", "Job Opening")
+        link = job.get("applyUrl")
+
+        if not link or link in sent_jobs:
+            continue
 
         message = f"""🏢 PwC Hiring!
 
@@ -128,23 +174,20 @@ def fetch_pwc_campus():
 Apply Here:
 {link}
 
-#Jobs #MNCJobs PwC
+#Jobs #PwC
 """
         send(message)
+        sent_jobs.add(link)
 
+# =========================================================
+# RUN ALL
+# =========================================================
+check_rss()
+check_oracle()
+check_pwc()
 
-# -------- RUN ALL --------
+# Save DB
+with open(DB_FILE, "w") as f:
+    json.dump(list(sent_jobs), f)
 
-print("Checking RSS...")
-for company, url in FEEDS.items():
-    check_rss(company, url)
-
-print("Checking Oracle APIs...")
-fetch_oracle("KPMG", "CX_1")
-fetch_oracle("KPMG-Alt", "CX_3")
-fetch_oracle("KPMG-Global", "CX_3001")
-
-print("Checking PwC Campus...")
-fetch_pwc_campus()
-
-print("TEST RUN COMPLETE")
+print("\nFinished successfully")
