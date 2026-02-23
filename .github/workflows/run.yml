@@ -8,7 +8,23 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - run: pip install feedparser requests beautifulsoup4
-      - run: python bot.py
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+
+      - name: Install dependencies
+        run: pip install feedparser requests beautifulsoup4
+
+      - name: Run bot
+        run: python bot.py
+
+      - name: Commit updated job history
+        run: |
+          git config --global user.name "job-bot"
+          git config --global user.email "bot@users.noreply.github.com"
+          git add sent_jobs.json
+          git commit -m "Update sent jobs history" || echo "No changes"
+          git push
